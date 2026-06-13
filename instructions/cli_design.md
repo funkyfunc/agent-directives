@@ -38,6 +38,7 @@ This document serves as the baseline specification for generating and maintainin
 ## 4. Exit Codes
 - Return `0` strictly for absolute operational success. Never catch a runtime error and exit with `0`.
 - Return non-zero (`1-255`) for any failure, warning, or abnormal termination.
+- **Centralized Error Handling**: Centralize error handling at the very top of the command execution tree. Catch exceptions/errors globally, log the root cause and diagnostic info directly to `stderr`, map the failure to the most appropriate `sysexits.h` code, and exit.
 - **sysexits.h Standards**: Use precise exit codes over a generic `1` where possible:
 
 | Exit Code | POSIX Macro | Architectural Meaning |
@@ -65,6 +66,7 @@ This document serves as the baseline specification for generating and maintainin
   - `XDG_DATA_HOME`: General portable data files. Fallback: `$HOME/.local/share/`
   - `XDG_STATE_HOME`: Operational state (logs, history). Fallback: `$HOME/.local/state/`
   - `XDG_CACHE_HOME`: Non-essential regenerable data. Fallback: `$HOME/.cache/`
+- **Cross-Platform Mappings**: When compiling cross-platform binaries, map XDG concepts to standard OS equivalents (e.g., Windows: `%APPDATA%` for config, `%LOCALAPPDATA%` for cache/data/state; macOS: `~/Library/Application Support/` for config/data, `~/Library/Caches/` for cache).
 
 ## 6. Help and Discoverability
 - **Standard Help Output**: Dynamically generate help text (`-h` / `--help`) from the parser schema. Include Usage, Description, Arguments, Flags (Local vs. Persistent), Subcommands, and Examples.
