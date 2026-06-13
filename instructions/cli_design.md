@@ -1,8 +1,4 @@
----
-description: Master Architectural Specification and Agent Instructions for CLI design.
----
-
-# Master CLI Design Philosophy
+# CLI Design Philosophy
 
 This document serves as the baseline specification for generating and maintaining Command Line Interface (CLI) applications. The downstream coding agent MUST internalize and strictly adhere to these rules. The objective is to produce tools that are highly composable, possess exceptional local-first performance, and exhibit deep user empathy.
 
@@ -15,7 +11,9 @@ This document serves as the baseline specification for generating and maintainin
 ## 2. Arguments, Flags, and Options
 - **POSIX Compliance**: Use standard parsing libraries (`clap`, `cobra`) instead of ad-hoc splitting. Support short options (`-a`), long options (`--all`), option clustering (`-abc`), and standard value attachments.
 - **Positional vs. Flags**: Use positional arguments for mandatory operational targets (e.g., `cp <src> <dest>`). Use flags for optional modifiers. Do not require long options for basic use cases.
-- **Subcommand Architecture**: Implement a hierarchical command tree for tools with multiple discrete functions (e.g., `app user add`). Differentiate between local flags (scoped to a subcommand) and persistent flags (global options like `--verbose`).
+- **Subcommand Architecture**: Implement a hierarchical command tree for tools with multiple discrete functions.
+  - *Example*: `app user add` should act as its own logical unit with specific positional arguments and local flags.
+  - *Local vs Persistent*: Differentiate between local flags (scoped to a subcommand) and persistent flags (global options like `--verbose` or `--config` applied to the root command).
 - **Double-Dash Terminator (`--`)**: Must be supported to safely pass positional arguments that begin with hyphens (e.g., `rm -- -r`).
 - **Single Hyphen (`-`)**: Must be supported as an operand to explicitly read from `stdin` or write to `stdout` in lieu of a file path.
 
@@ -26,15 +24,34 @@ This document serves as the baseline specification for generating and maintainin
 - **TTY Detection**: The application MUST actively detect if streams are connected to an interactive terminal (`isatty`).
   - **Non-TTY Fallback**: Automatically strip ANSI color codes, disable spinners, and bypass prompts if not in a TTY environment.
   - **Interactive Safeguards**: Never block execution waiting for interactive input in headless environments. Abort with a descriptive error unless a `--force` flag is provided.
-- **Terminal Colors**:
-  - Respect `NO_COLOR` (if present, suppress color completely).
-  - Respect `CLICOLOR` and `CLICOLOR_FORCE` for granular control.
-  - Apply styling conditionally based on TTY presence and environmental flags.
+- **Terminal Colors Evaluation Hierarchy**: Process rules from highest priority down to the default:
+
+| Priority | Source | Condition | Behavior |
+| --- | --- | --- | --- |
+| **1 (Highest)** | Flag | `--color=always` / `--color=never` | Immediate adherence. Overrides environment and hardware logic. |
+| **2** | Env Var | `CLICOLOR_FORCE != 0` | Force emission of ANSI color codes, bypassing TTY checks. |
+| **3** | Env Var | `NO_COLOR` is present and non-empty | Completely suppress all ANSI color output. |
+| **4** | Env Var | `CLICOLOR == 0` | Completely suppress all ANSI color output. |
+| **5** | Hardware | `isatty` returns false | Suppress color. Output is piped to a file or machine parser. |
+| **6 (Lowest)** | Default | TTY is true | Safely emit standard colored output. |
 
 ## 4. Exit Codes
-- Return `0` strictly for absolute operational success.
+- Return `0` strictly for absolute operational success. Never catch a runtime error and exit with `0`.
 - Return non-zero (`1-255`) for any failure, warning, or abnormal termination.
-- **sysexits.h Standards**: Use precise exit codes over a generic `1` where possible (e.g., `64` EX_USAGE, `65` EX_DATAERR, `66` EX_NOINPUT, `77` EX_NOPERM, `78` EX_CONFIG). Never catch a runtime error and exit with `0`.
+- **sysexits.h Standards**: Use precise exit codes over a generic `1` where possible:
+
+| Exit Code | POSIX Macro | Architectural Meaning |
+| --- | --- | --- |
+| 64 | `EX_USAGE` | Command line usage error (invalid flags, missing arguments). |
+| 65 | `EX_DATAERR` | Data format error (malformed input, unreadable JSON). |
+| 66 | `EX_NOINPUT` | Cannot open input (file does not exist or lacks permission). |
+| 68 | `EX_NOHOST` | Host name unknown (DNS resolution failure). |
+| 69 | `EX_UNAVAILABLE` | Service unavailable (routing failure, 503 response). |
+| 70 | `EX_SOFTWARE` | Internal software error (unhandled panics, null pointers). |
+| 71 | `EX_OSERR` | System error (out of memory, fork failed). |
+| 73 | `EX_CANTCREAT` | Cannot create output file (locked states, missing directories). |
+| 77 | `EX_NOPERM` | Permission denied (lack of filesystem ACLs). |
+| 78 | `EX_CONFIG` | Configuration error (unparseable or conflicting config file). |
 
 ## 5. Environment and Configuration
 - **Configuration Hierarchy**: Resolve configuration variables using strict precedence:
@@ -44,10 +61,10 @@ This document serves as the baseline specification for generating and maintainin
   4. Global Configuration Files
   5. Application Defaults (Lowest Priority)
 - **XDG Base Directory Specification**: Never hardcode configuration files to `$HOME/.myapp/`. Use standard XDG variables with proper fallbacks:
-  - `XDG_CONFIG_HOME` (fallback: `$HOME/.config/`)
-  - `XDG_DATA_HOME` (fallback: `$HOME/.local/share/`)
-  - `XDG_STATE_HOME` (fallback: `$HOME/.local/state/`)
-  - `XDG_CACHE_HOME` (fallback: `$HOME/.cache/`)
+  - `XDG_CONFIG_HOME`: Configuration files. Fallback: `$HOME/.config/`
+  - `XDG_DATA_HOME`: General portable data files. Fallback: `$HOME/.local/share/`
+  - `XDG_STATE_HOME`: Operational state (logs, history). Fallback: `$HOME/.local/state/`
+  - `XDG_CACHE_HOME`: Non-essential regenerable data. Fallback: `$HOME/.cache/`
 
 ## 6. Help and Discoverability
 - **Standard Help Output**: Dynamically generate help text (`-h` / `--help`) from the parser schema. Include Usage, Description, Arguments, Flags (Local vs. Persistent), Subcommands, and Examples.
