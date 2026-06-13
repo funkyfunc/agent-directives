@@ -1,57 +1,71 @@
 ---
-description: How to design CLI arguments, flags, and outputs.
+description: Master Architectural Specification and Agent Instructions for CLI design.
 ---
 
 # Master CLI Design Philosophy
 
-When building or reviewing CLI applications (like `filegoblin` or generic Rust tools), adhere to these principles synthesized from clig.dev and bettercli.org.
+This document serves as the baseline specification for generating and maintaining Command Line Interface (CLI) applications. The downstream coding agent MUST internalize and strictly adhere to these rules. The objective is to produce tools that are highly composable, possess exceptional local-first performance, and exhibit deep user empathy.
 
-## 1. Human-First Interaction
-- **Conversation as the Norm**: Users learn through exploration. The CLI should act as a helpful guide rather than a strict enforcer.
-- **Empathy in Design**: Provide help, suggest corrections for typos (e.g., "Did you mean `--split`?"), and ensure the user feels empowered.
-- **Intelligent Defaults**: Make the default behavior the right thing for *most* users. If a feature is difficult to enable, people won't use it.
-- **Say (Just) Enough**: Respect the user's attention. Don't hang silently for minutes, but don't drown them in debugging output either. Find the balance.
+## 1. Core Philosophy
+- **Composability**: Expect the output of every program to become the input to another. Data MUST be easily processable by standard text utilities (`grep`, `awk`, `jq`).
+- **Local-First & Fast**: Execution speed is mandatory. Defer heavy network calls or complex initializations until strictly necessary. Provide sensible defaults so commands work without exhaustive configuration.
+- **User Empathy**: Favor descriptive, standard naming conventions over esoteric abbreviations. Provide actionable error messages rather than raw stack traces.
+- **Backward Compatibility**: Command signatures (flags, argument order, output format) are a binding contract. If a feature is retired, use a prolonged deprecation cycle with non-fatal warnings before removal.
 
-## 2. Robustness and Predictability
-- **Exit Codes**: Always return `0` on success and non-zero on failure. This is non-negotiable for scripts.
-- **Standard Streams**:
-  - **`stdout`**: Primary output *only*. This is what gets piped into the next command.
-  - **`stderr`**: Messaging, logs, warnings, progress bars, and errors. This prevents metadata from corrupting piped pipelines.
-- **Consistency**: Adhere to established terminal conventions. Use standard flags (`-a` for all, `-f` for force, `-v` for verbose/version). The terminal is hardwired into our fingers; don't fight it.
-- **Dry Runs & Confirmations**: For destructive actions, either prompt for confirmation (when interactive) or require a `-f`/`--force` flag (when scripted). Use `--dry-run` (`-n`) for complex operations.
+## 2. Arguments, Flags, and Options
+- **POSIX Compliance**: Use standard parsing libraries (`clap`, `cobra`) instead of ad-hoc splitting. Support short options (`-a`), long options (`--all`), option clustering (`-abc`), and standard value attachments.
+- **Positional vs. Flags**: Use positional arguments for mandatory operational targets (e.g., `cp <src> <dest>`). Use flags for optional modifiers. Do not require long options for basic use cases.
+- **Subcommand Architecture**: Implement a hierarchical command tree for tools with multiple discrete functions (e.g., `app user add`). Differentiate between local flags (scoped to a subcommand) and persistent flags (global options like `--verbose`).
+- **Double-Dash Terminator (`--`)**: Must be supported to safely pass positional arguments that begin with hyphens (e.g., `rm -- -r`).
+- **Single Hyphen (`-`)**: Must be supported as an operand to explicitly read from `stdin` or write to `stdout` in lieu of a file path.
 
-## 3. Composability: Simple Parts That Work Together
-- **Machine vs Human Output**: If outputting human-readable data (colors, tables, animations) breaks machine readability, detect if the output is a TTY.
-- Offer `--plain` para tabular data parsing.
-- Offer `--json` flags to provide strictly structured, machine-parsable state without resorting to `awk`/`sed` hacks.
+## 3. Standard I/O, Streams, and TTY
+- **Strict Stream Separation**:
+  - **`stdout`**: Reserved exclusively for machine-readable data payloads. Never print conversational text or prefixes here.
+  - **`stderr`**: Used for all out-of-band communication: diagnostic messages, warnings, logs, interactive prompts, loading spinners, and progress bars.
+- **TTY Detection**: The application MUST actively detect if streams are connected to an interactive terminal (`isatty`).
+  - **Non-TTY Fallback**: Automatically strip ANSI color codes, disable spinners, and bypass prompts if not in a TTY environment.
+  - **Interactive Safeguards**: Never block execution waiting for interactive input in headless environments. Abort with a descriptive error unless a `--force` flag is provided.
+- **Terminal Colors**:
+  - Respect `NO_COLOR` (if present, suppress color completely).
+  - Respect `CLICOLOR` and `CLICOLOR_FORCE` for granular control.
+  - Apply styling conditionally based on TTY presence and environmental flags.
 
-## 4. Documentation and Help
-- **Accessible Help**: `-h` and `--help` must always display help, regardless of other inputs.
-- **Contextual Stacking**:
-  - `cmd` (no args): Brief description and one or two examples.
-  - `cmd --help`: Full detailed help.
-- **Lead with Examples**: Users scan for examples over reading paragraphs. Show common use cases at the very top.
-- **Actionable Errors**: Treat errors as documentation. Never just say "Failed." Say "Failed: Cannot write to file. Try running with sudo or changing permissions." Keep the signal-to-noise ratio extremely high.
+## 4. Exit Codes
+- Return `0` strictly for absolute operational success.
+- Return non-zero (`1-255`) for any failure, warning, or abnormal termination.
+- **sysexits.h Standards**: Use precise exit codes over a generic `1` where possible (e.g., `64` EX_USAGE, `65` EX_DATAERR, `66` EX_NOINPUT, `77` EX_NOPERM, `78` EX_CONFIG). Never catch a runtime error and exit with `0`.
 
-## 5. Visual Aesthetics (Vibe)
-- **Color**: Use color with intention. Highlight key data, use red for errors. But respect the `NO_COLOR` environment variable or non-TTY pipes to automatically disable it.
-- **Layout**: Increase information density intelligently. ASCII art, tables, and spacing make scanning easier.
+## 5. Environment and Configuration
+- **Configuration Hierarchy**: Resolve configuration variables using strict precedence:
+  1. Command-Line Flags (Highest Priority)
+  2. Environment Variables
+  3. Local Configuration Files (`./.apprc.json`)
+  4. Global Configuration Files
+  5. Application Defaults (Lowest Priority)
+- **XDG Base Directory Specification**: Never hardcode configuration files to `$HOME/.myapp/`. Use standard XDG variables with proper fallbacks:
+  - `XDG_CONFIG_HOME` (fallback: `$HOME/.config/`)
+  - `XDG_DATA_HOME` (fallback: `$HOME/.local/share/`)
+  - `XDG_STATE_HOME` (fallback: `$HOME/.local/state/`)
+  - `XDG_CACHE_HOME` (fallback: `$HOME/.cache/`)
 
-## 6. Flag & Argument Architecture
-- **Prefer Flags to Arguments**: `cmd --file data.txt` is much safer and easier to scale than `cmd data.txt` if you ever need to add more functionality.
-- **Long vs Short**: Every flag must have a long version (`--all`). Only use short flags (`-a`) for the absolute most common operations to avoid polluting the namespace.
-- **Never Require a Prompt**: Prompts are great for humans, but destroy automation. Every prompt must be bypassable via a flag.
+## 6. Help and Discoverability
+- **Standard Help Output**: Dynamically generate help text (`-h` / `--help`) from the parser schema. Include Usage, Description, Arguments, Flags (Local vs. Persistent), Subcommands, and Examples.
+- **Autocompletion**: Natively support generating shell autocompletion scripts (bash, zsh, fish) and support context-aware completion where applicable.
+- **Actionable Errors**: Suggest corrections for typos (e.g., "unknown command 'updaet'. Did you mean 'update'?").
 
-## 7. Lifecycle and Configuration
-- **The Machine Belongs to the User**: Your CLI is a guest. Leave no trace without permission. Provide clean uninstalls, don't litter the filesystem, and support users who stay on older versions.
-- **Configuration Layering**: Support a predictable hierarchy where explicit CLI flags override Environment Variables, which in turn override Configuration files.
-- **Robust Booleans**: For environment variables, accept multiple truthy/falsy states (e.g., `1`, `TRUE`, `True`, `ENABLED` vs `0`, `FALSE`, `DISABLED`).
-
-## 8. Networking and Proxies
+## 7. Networking and Proxies
 - **Centralize Networking**: Keep all HTTP/network calls flowing through a single module to ensure consistent configuration.
 - **Respect Standard Proxies**: Explicitly respect `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`.
 
-## 9. Analytics and Telemetry
+## 8. Analytics and Telemetry
 - **Fail-Fast and Last**: Analytics requests must never hang the CLI. Fire them asynchronously at the bleeding end of execution with a strict timeout (e.g., 2 seconds).
-- **Facade APIs**: Never ping third-party trackers (like Google Analytics) directly from the CLI. This triggers firewalls and looks like malware. Proxy telemetry through your own infrastructure facade API.
+- **Facade APIs**: Never ping third-party trackers (like Google Analytics) directly from the CLI. Proxy telemetry through your own infrastructure facade API.
 - **Anonymize Ruthlessly**: Do not collect file paths or repo names—they often contain highly sensitive credentials or company names.
+
+## 9. Anti-Patterns to Avoid
+- **The "God File" Monolith**: Do not put everything in `main.go` or `main.rs`. Decouple command parsing from business logic.
+- **Log Pollution in `stdout`**: Never print INFO, WARN, DEBUG, or ERROR logs to `stdout`.
+- **Interactivity Deadlocks**: Never wait for `stdin` confirmation on destructive actions without a programmatically passable bypass flag (e.g., `--yes` or `--force`).
+- **Breaking Backward Compatibility**: Never arbitrarily change flag names or argument orders in minor version bumps.
+- **Reinventing the Wheel**: Do not write custom Regex parsers for flags or custom formats for config files. Use established libraries (`clap`, `cobra`, JSON, TOML, YAML).
