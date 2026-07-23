@@ -109,26 +109,6 @@ Structure code so behavior is understandable **locally**, changes have a **small
 ### Functions
 Keep functions small and single-purpose, at one level of abstraction, with few parameters. Use early returns and guard clauses to flatten nesting — the happy path stays un-nested at the left margin.
 
-```python
-# BAD: Deep nesting
-def process_order(order):
-    if order is not None:
-        if order.is_paid:
-            if order.in_stock:
-                ship_item(order)
-
-# GOOD: Guard clauses flatten logic
-def process_order(order):
-    if not order:
-        return
-    if not order.is_paid:
-        return
-    if not order.in_stock:
-        return
-
-    ship_item(order)
-```
-
 ### Side Effects
 Isolate I/O and state mutation from pure decision logic. Name side-effecting functions for what they change. Prefer computing data in pure functions, then acting on it at the boundaries.
 
@@ -165,7 +145,7 @@ function processEmail(email: string) {
 // GOOD: Parse at the boundary, trust the type downstream
 class Email {
   constructor(public readonly value: string) {
-    if (!value.includes('@')) throw new Error("Invalid");
+    if (!isValidEmail(value)) throw new Error("Invalid");
   }
 }
 
@@ -216,7 +196,6 @@ Design modules that expose a narrow, simple interface while encapsulating comple
 
 - **Why, not what.** Write comments for rationale, constraints, assumptions, non-obvious tradeoffs. Code explains *what* — comments explain *why*.
 - Delete comments that restate the code. Improve names and structure instead.
-- Delete commented-out code. Version control remembers.
 - Keep docs next to the code they describe.
 - **Update or remove comments when behavior changes.** A stale comment is worse than none.
 - Use `TODO`/`FIXME` sparingly. Do not let them accumulate.
@@ -248,7 +227,7 @@ Read and understand the environment before modifying it. Do not begin generating
 Refactoring is not a license to rewrite. Protect the repository's audit trail.
 - Restrict modifications strictly to the execution path of the requested feature or bug fix.
 - Do not format, reorganize, or rename elements in parts of the file you were not asked to modify. Unsolicited "drive-by" refactoring destroys git blame history and inflates code reviews.
-- **"Wash one more plate" rule:** you may make exactly *one* highly localized micro-improvement adjacent to your actual change (e.g., renaming a directly confusing variable, extracting one obviously long block). Stop there.
+- **"Wash one more plate" rule:** you may make exactly *one* highly localized micro-improvement adjacent to your actual change (e.g., renaming a directly confusing variable, extracting one obviously long block). Stop there. This is the sole exception to "do not mix refactor with feature/bugfix" — it applies only when the improvement is trivially reviewable inside the same diff; anything larger lands as its own change.
 - If you discover pre-existing bugs or tech debt unrelated to the current task, document them (e.g., a TODO or a separate issue) — do not fix them in the same change.
 - **Bend when:** the user explicitly requests a comprehensive refactoring, formatting, or linting pass.
 
@@ -262,7 +241,7 @@ These are **hard rules**, not heuristics:
 - **Never** hardcode secrets, API keys, or credentials. Inject from environment variables or secret managers.
 - **Never** weaken validation, authentication, authorization, or access controls.
 - **Never** add a dependency, library, or package that is not already in the project's lockfile unless explicitly authorized by the user. Package hallucination (confidently referencing non-existent packages) is a known agent failure mode that creates supply-chain attack vectors.
-- If a task requires external functionality not in the project, write the solution using the language's standard library, or vendor a minimal implementation into the source tree.
+- If a task requires external functionality not in the project: implement trivial functionality with the language's standard library. For anything non-trivial or security-sensitive (crypto, parsing untrusted input, auth, date/time arithmetic), **stop and ask the user** — a hand-rolled implementation of these is usually a worse security outcome than a well-vetted dependency.
 - Never execute raw package installation commands that alter lockfiles or fetch unpinned versions without explicit user authorization.
 - Keep sensitive operations explicit and reviewable.
 - If a task touches auth, secrets, user input, network boundaries, permissions, or sensitive data — treat it with extra care and prefer the most explicit approach.
@@ -274,6 +253,13 @@ These are **hard rules**, not heuristics:
 - Structure code to be testable: clear inputs/outputs, injectable dependencies, minimal global state.
 - Do not make critical behavior hard to verify.
 
+### Test Integrity (hard rules)
+
+- **Never delete, skip, or loosen a failing test to make the suite pass.** A failing test is information — report it and fix the code, or flag the test as wrong and let the user decide.
+- **Never hardcode expected values or special-case test inputs in production code** to satisfy a test. Code that detects "am I under test?" is a defect.
+- **Never suppress type-checker or linter errors** (ignore pragmas, blanket casts, disabled rules) just to make a build pass. Fix the cause or surface the problem.
+- **Run the relevant tests before declaring work done.** Report results honestly — including failures, skips, and tests you could not run.
+
 ---
 
 ## Agent Execution Guardrails
@@ -283,34 +269,7 @@ Recognize when you are logically stuck and break the cycle. Do not fail expensiv
 - **Track your own attempts.** If you fail to resolve a runtime or test error after two structurally distinct approaches, you are likely in a cognitive deadlock — repeatedly applying micro-variations of the same flawed logic.
 - If a path fails twice, **step back and reframe**: explicitly identify the flawed assumption, then attempt a fundamentally different approach rather than another variation.
 - Do not simplify complex conditionals, boundary checks, or edge-case handling just to make code shorter. Nuanced logic exists for a reason — preserve it during modifications.
-- Do not confuse local and global scope. Before using a variable, verify it is accessible in the current scope.
 - **Bend when:** the failure is a strict syntax, formatting, or type-checker error that requires iterative alignment rather than a change in logical approach.
-
----
-
-## Anti-Patterns
-
-Do not produce code exhibiting these patterns:
-
-- **Clever code** — saves keystrokes, costs every future reader.
-- **Premature abstraction** — indirection before the shape is known.
-- **Speculative extensibility** — hooks for unbuilt futures (YAGNI).
-- **Large multipurpose functions** — multiple jobs in one unit.
-- **Hidden side effects** — state changes via globals/singletons.
-- **Boolean flag arguments** — a flag that switches behavior is two functions; split them.
-- **Inconsistent patterns** — multiple ways to do the same thing.
-- **Excessive indirection** — many thin wrappers to trace one operation.
-- **Shallow modules** — pass-through methods that forward arguments without adding value.
-- **Over-generalized utility modules** — grab-bags without a clear responsibility.
-- **Vague or misleading names** — `data`, `tmp`, `doProcess`.
-- **Stale comments** — actively mislead readers.
-- **Silent error swallowing** — failures resurface far from the cause.
-- **Broad unsolicited rewrites** — risk regressions, hard to review, destroy git blame history.
-- **Unnecessary dependencies** — maintenance and supply-chain cost for what existing code does.
-- **Optimizing without evidence** — complexity for unverified gains.
-- **Lava Flow** — dead or deprecated code left out of fear. Delete aggressively.
-- **Cognitive deadlocks** — repeatedly applying micro-variations of a failed approach instead of stepping back to reframe.
-- **Scope creep** — "improving" code beyond the task boundary, polluting diffs and destroying audit trails.
 
 ---
 
@@ -330,7 +289,7 @@ Run this checklist before finalizing every change:
 - [ ] **Scope is disciplined** — no drive-by refactoring beyond the task boundary.
 - [ ] **Codebase conventions** were followed.
 - [ ] No **unnecessary dependencies** introduced; no hallucinated packages.
-- [ ] Critical behavior remains **testable**.
+- [ ] Critical behavior remains **testable**; relevant tests were **run** and results reported honestly.
+- [ ] **Test integrity** holds — no test weakened, skipped, or deleted to force a pass; no suppressed checker errors.
 - [ ] **Security baseline** holds — no leaked secrets, no weakened auth/validation.
-- [ ] The code can be **confidently modified later**.
 - [ ] I am **not in a cognitive deadlock** — if stuck, I have reframed my approach.
